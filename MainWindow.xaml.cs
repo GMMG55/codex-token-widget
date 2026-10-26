@@ -87,7 +87,8 @@ public partial class MainWindow : Window
             var snapshot = await usageService.ReadAsync();
             latestSnapshot = snapshot;
             RenderSnapshot(snapshot);
-            ToolTip = null;
+            ToolTip = usageService.LastAppServerError;
+            if (usageService.LastAppServerError is { } backendError) WriteErrorLog(new InvalidOperationException(backendError));
         }
         catch (Exception exception)
         {
@@ -104,8 +105,8 @@ public partial class MainWindow : Window
 
     private void RenderSnapshot(UsageSnapshot snapshot)
     {
-        FiveHourPercentText.Text = $"{snapshot.FiveHourUsedPercent}%";
-        WeekPercentText.Text = $"{snapshot.WeekUsedPercent}%";
+        FiveHourPercentText.Text = snapshot.HasRateLimits ? $"{snapshot.FiveHourUsedPercent}%" : "--";
+        WeekPercentText.Text = snapshot.HasRateLimits ? $"{snapshot.WeekUsedPercent}%" : "--";
         FiveHourResetText.Text = FormatReset(snapshot.FiveHourResetsAt);
         WeekResetText.Text = FormatReset(snapshot.WeekResetsAt);
         TodayTokensText.Text = snapshot.IsTodayReported ? FormatCompactNumber(snapshot.TodayTokens) : "--";
@@ -121,11 +122,14 @@ public partial class MainWindow : Window
         FiveHourPercentText.Foreground = CreateUsageBrush(snapshot.FiveHourUsedPercent);
         WeekPercentText.Foreground = CreateUsageBrush(snapshot.WeekUsedPercent);
         UpdateEdgeProgress(snapshot.FiveHourUsedPercent);
+        if (!snapshot.HasRateLimits) EdgeBar.ToolTip = Localization.Text("限额暂不可用");
         edgePreview.UpdateProgress(snapshot.FiveHourUsedPercent);
         DrawChart(snapshot.LastSevenDays);
-        UpdatedText.Text = usageService.LastReadUsedCachedAppServerData
-            ? Localization.Text("刷新 {0:HH:mm} · 限额为缓存数据", DateTime.Now)
+        UpdatedText.Text = usageService.LastAppServerError is not null
+            ? Localization.Text("部分数据暂不可用")
             : Localization.Text("刷新 {0:HH:mm}", DateTime.Now);
+        if (usageService.LastReadUsedCachedAppServerData) UpdatedText.Text = Localization.Text("部分数据为上次缓存");
+        UpdatedText.ToolTip = usageService.LastAppServerError;
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)

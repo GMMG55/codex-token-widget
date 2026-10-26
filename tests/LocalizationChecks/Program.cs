@@ -18,6 +18,7 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        UsageChecks.RunAsync(args.Contains("--live")).GetAwaiter().GetResult();
         Check(new WidgetSettings().LanguageMode == "System", "New settings follow system");
         Check(JsonSerializer.Deserialize<WidgetSettings>("{\"ThemeMode\":\"Dark\"}")!.LanguageMode == "System", "Old settings migrate without losing defaults");
         foreach (var (mode, system, expected) in new[]
@@ -55,7 +56,7 @@ internal static class Program
         Check(((TextBlock)window.FindName("LongestTurnText")).Text == "2h 4m", "English widget duration");
         var tray = (System.Windows.Forms.NotifyIcon)typeof(MainWindow).GetField("trayIcon", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(window)!;
         Check(tray.ContextMenuStrip!.Items[0].Text == "Show", "English tray menu");
-        if (args.Length > 0)
+        if (args.Length > 0 && !args[0].StartsWith("--"))
         {
             SavePreview(window, Path.Combine(args[0], "widget-en.png"));
             SavePreview(settingsWindow, Path.Combine(args[0], "settings-en.png"));
@@ -73,6 +74,9 @@ internal static class Program
         settings.LanguageMode = "en";
         Invoke(window, "ApplySettings");
         Check(window.Title == "Codex token usage", "Switch back to English");
+        Invoke(window, "RenderSnapshot", snapshot with { HasRateLimits = false, FiveHourUsedPercent = 0, WeekUsedPercent = 0 });
+        Check(((TextBlock)window.FindName("FiveHourPercentText")).Text == "--", "Missing limits do not display zero percent");
+        Check(((TextBlock)window.FindName("WeekPercentText")).Text == "--", "Missing weekly limits do not display zero percent");
         window.Close();
         settingsWindow.Close();
         app.Shutdown();

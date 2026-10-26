@@ -11,7 +11,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <AssemblyName>CodexTokenWidget</AssemblyName>
-    <Version>1.20.0</Version>
+    <Version>1.20.1</Version>
     <ApplicationIcon>Assets\codex-token-widget.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>

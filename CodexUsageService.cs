@@ -10,10 +10,12 @@ public sealed class CodexUsageService
     private UsageSnapshot? lastAppServerSnapshot;
 
     public bool LastReadUsedCachedAppServerData { get; private set; }
+    public string? LastAppServerError { get; private set; }
 
     public async Task<UsageSnapshot> ReadAsync()
     {
         LastReadUsedCachedAppServerData = false;
+        LastAppServerError = null;
         var localUsageTask = Task.Run(ReadLocalTodayUsage);
         try
         {
@@ -21,13 +23,14 @@ public sealed class CodexUsageService
             lastAppServerSnapshot = snapshot;
             return ApplyLocalTodayUsage(snapshot, await localUsageTask);
         }
-        catch
+        catch (Exception exception)
         {
+            LastAppServerError = exception.Message;
             var localUsage = await localUsageTask;
-            if (localUsage.IsAvailable && lastAppServerSnapshot is not null)
+            if (lastAppServerSnapshot is not null)
             {
                 LastReadUsedCachedAppServerData = true;
-                return ApplyLocalTodayUsage(lastAppServerSnapshot, localUsage);
+                return ApplyLocalTodayUsage(RefreshCalendar(lastAppServerSnapshot), localUsage);
             }
             if (localUsage.IsAvailable) return BuildLocalOnlySnapshot(localUsage);
             throw;
@@ -37,7 +40,9 @@ public sealed class CodexUsageService
     private async Task<UsageSnapshot> ReadAppServerAsync()
     {
         using var process = StartAppServer();
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(35));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        // Drain stderr while the server runs so a full pipe cannot stall JSON-RPC replies.
+        var stderr = process.StandardError.ReadToEndAsync(cancellation.Token);
 
         try
         {
@@ -52,24 +57,82 @@ public sealed class CodexUsageService
                     capabilities = new { experimentalApi = true, requestAttestation = false }
                 }
             }, cancellation.Token);
-            await ReadResponseAsync(process, 1, cancellation.Token);
+            await ReadResponseAsync(process, 1, cancellation.Token, stderr);
 
             await SendAsync(process, new { method = "initialized" }, cancellation.Token);
-            await SendAsync(process, new { method = "account/rateLimits/read", id = requestId++ }, cancellation.Token);
-            var limits = await ReadResponseAsync(process, 2, cancellation.Token);
-
-            await SendAsync(process, new { method = "account/usage/read", id = requestId++, @params = new { } }, cancellation.Token);
-            var usage = await ReadResponseAsync(process, 3, cancellation.Token);
-            return BuildSnapshot(limits, usage);
+            return await ReadRemoteSnapshotAsync(async (method, token) =>
+            {
+                var id = requestId++;
+                await SendAsync(process, new { method, id, @params = new { } }, token);
+                return await ReadResponseAsync(process, id, token, stderr);
+            }, cancellation.Token);
         }
         catch (OperationCanceledException)
         {
-            throw new TimeoutException(Localization.Text("Codex app-server 在 35 秒内没有完成用量查询。请稍后刷新。 "));
+            throw new TimeoutException(Localization.Text("Codex 后台查询超时，请稍后刷新。"));
         }
         finally
         {
             TryStop(process);
+            try { await stderr; } catch (OperationCanceledException) { }
         }
+    }
+
+    private async Task<UsageSnapshot> ReadRemoteSnapshotAsync(
+        Func<string, CancellationToken, Task<JsonElement>> query, CancellationToken token)
+    {
+        // These endpoints are independent: a failed history query must not erase fresh limits.
+        var errors = new List<string>();
+        async Task<JsonElement?> ReadWithRetry(string method)
+        {
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(20));
+                    return await query(method, timeout.Token);
+                }
+                catch (Exception exception) when (!token.IsCancellationRequested)
+                {
+                    if (attempt == 1) errors.Add($"{method}: {exception.Message}");
+                    else await Task.Delay(500, token);
+                }
+            }
+            return null;
+        }
+
+        var limits = await ReadWithRetry("account/rateLimits/read");
+        var usage = await ReadWithRetry("account/usage/read");
+        LastAppServerError = errors.Count == 0 ? null : string.Join(Environment.NewLine, errors);
+        var previous = lastAppServerSnapshot is null ? null : RefreshCalendar(lastAppServerSnapshot);
+        LastReadUsedCachedAppServerData = previous is not null && (limits is null || usage is null);
+        var snapshot = previous ?? BuildLocalOnlySnapshot(default);
+        if (limits is { } limitsResponse)
+        {
+            var rateLimits = TryGetObject(limitsResponse, "rateLimits");
+            var primary = TryGetObject(rateLimits, "primary");
+            var secondary = TryGetObject(rateLimits, "secondary");
+            snapshot = snapshot with
+            {
+                FiveHourUsedPercent = ReadPercent(primary), FiveHourResetsAt = ReadReset(primary),
+                WeekUsedPercent = ReadPercent(secondary), WeekResetsAt = ReadReset(secondary),
+                HasRateLimits = primary.ValueKind == JsonValueKind.Object || secondary.ValueKind == JsonValueKind.Object
+            };
+        }
+        if (usage is { } usageResponse) snapshot = ApplyUsage(snapshot, usageResponse);
+        return snapshot;
+    }
+
+    private static UsageSnapshot RefreshCalendar(UsageSnapshot snapshot)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var days = Enumerable.Range(-6, 7).Select(offset =>
+        {
+            var date = today.AddDays(offset);
+            return snapshot.LastSevenDays.FirstOrDefault(day => day.Date == date) ?? new DailyUsage(date, 0, false);
+        }).ToList();
+        return snapshot with { LastSevenDays = days, TodayTokens = days[^1].Tokens, IsTodayReported = days[^1].IsReported };
     }
 
     private static LocalTodayUsage ReadLocalTodayUsage()
@@ -138,9 +201,9 @@ public sealed class CodexUsageService
         var days = Enumerable.Range(-6, 7).Select(offset =>
         {
             var date = today.AddDays(offset);
-            return new DailyUsage(date, date == today ? localUsage.TotalTokens : 0, date == today);
+            return new DailyUsage(date, date == today ? localUsage.TotalTokens : 0, date == today && localUsage.IsAvailable);
         }).ToList();
-        return new UsageSnapshot(0, null, 0, null, localUsage.TotalTokens, true, true, days, null, null, null, null, null);
+        return new UsageSnapshot(0, null, 0, null, localUsage.TotalTokens, localUsage.IsAvailable, localUsage.IsAvailable, days, null, null, null, null, null) { HasRateLimits = false };
     }
 
     private static Process StartAppServer()
@@ -180,14 +243,14 @@ public sealed class CodexUsageService
         await process.StandardInput.FlushAsync(token);
     }
 
-    private static async Task<JsonElement> ReadResponseAsync(Process process, int id, CancellationToken token)
+    private static async Task<JsonElement> ReadResponseAsync(Process process, int id, CancellationToken token, Task<string> stderr)
     {
         while (true)
         {
             var line = await process.StandardOutput.ReadLineAsync(token);
             if (line is null)
             {
-                var details = await process.StandardError.ReadToEndAsync(token);
+                var details = await stderr.WaitAsync(token);
                 throw new InvalidOperationException(Localization.Text("Codex app-server 意外结束。{0}", details));
             }
 
@@ -200,11 +263,8 @@ public sealed class CodexUsageService
         }
     }
 
-    private static UsageSnapshot BuildSnapshot(JsonElement limitsResponse, JsonElement usageResponse)
+    private static UsageSnapshot ApplyUsage(UsageSnapshot snapshot, JsonElement usageResponse)
     {
-        var rateLimits = limitsResponse.GetProperty("rateLimits");
-        var primary = TryGetObject(rateLimits, "primary");
-        var secondary = TryGetObject(rateLimits, "secondary");
         var buckets = new Dictionary<DateOnly, long>();
 
         if (usageResponse.TryGetProperty("dailyUsageBuckets", out var sourceBuckets) && sourceBuckets.ValueKind == JsonValueKind.Array)
@@ -215,7 +275,7 @@ public sealed class CodexUsageService
             }
         }
 
-        var summary = usageResponse.GetProperty("summary");
+        var summary = TryGetObject(usageResponse, "summary");
         var today = DateOnly.FromDateTime(DateTime.Today);
         var days = Enumerable.Range(-6, 7).Select(offset =>
         {
@@ -223,15 +283,20 @@ public sealed class CodexUsageService
             return new DailyUsage(date, buckets.GetValueOrDefault(date), buckets.ContainsKey(date));
         }).ToList();
 
-        return new UsageSnapshot(
-            ReadPercent(primary), ReadReset(primary), ReadPercent(secondary), ReadReset(secondary),
-            days[^1].Tokens, days[^1].IsReported, false, days,
-            ReadNullableLong(summary, "lifetimeTokens"), ReadNullableLong(summary, "peakDailyTokens"),
-            ReadNullableLong(summary, "longestRunningTurnSec"), ReadNullableLong(summary, "currentStreakDays"), ReadNullableLong(summary, "longestStreakDays"));
+        return snapshot with
+        {
+            TodayTokens = days[^1].Tokens, IsTodayReported = days[^1].IsReported,
+            IsTodayFromLocalSession = false, LastSevenDays = days,
+            LifetimeTokens = ReadNullableLong(summary, "lifetimeTokens"),
+            PeakDailyTokens = ReadNullableLong(summary, "peakDailyTokens"),
+            LongestRunningTurnSec = ReadNullableLong(summary, "longestRunningTurnSec"),
+            CurrentStreakDays = ReadNullableLong(summary, "currentStreakDays"),
+            LongestStreakDays = ReadNullableLong(summary, "longestStreakDays")
+        };
     }
 
-    private static JsonElement TryGetObject(JsonElement owner, string name) => owner.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Object ? value : default;
-    private static long? ReadNullableLong(JsonElement owner, string name) => owner.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetInt64() : null;
+    private static JsonElement TryGetObject(JsonElement owner, string name) => owner.ValueKind == JsonValueKind.Object && owner.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Object ? value : default;
+    private static long? ReadNullableLong(JsonElement owner, string name) => owner.ValueKind == JsonValueKind.Object && owner.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetInt64() : null;
     private static int ReadPercent(JsonElement value) => value.ValueKind == JsonValueKind.Undefined ? 0 : value.TryGetProperty("usedPercent", out var percent) ? percent.GetInt32() : 0;
     private static DateTimeOffset? ReadReset(JsonElement value) => value.ValueKind == JsonValueKind.Undefined || !value.TryGetProperty("resetsAt", out var reset) || reset.ValueKind == JsonValueKind.Null ? null : DateTimeOffset.FromUnixTimeSeconds(reset.GetInt64());
 
@@ -261,7 +326,10 @@ public sealed record UsageSnapshot(
     long? PeakDailyTokens,
     long? LongestRunningTurnSec,
     long? CurrentStreakDays,
-    long? LongestStreakDays);
+    long? LongestStreakDays)
+{
+    public bool HasRateLimits { get; init; } = true;
+}
 
 public sealed record DailyUsage(DateOnly Date, long Tokens, bool IsReported);
 
