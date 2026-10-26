@@ -48,7 +48,7 @@ public sealed class CodexUsageService
                 id = requestId++,
                 @params = new
                 {
-                    clientInfo = new { name = "codex-token-widget", title = "Codex Token Widget", version = "1.8.0" },
+                    clientInfo = new { name = "codex-token-widget", title = "Codex Token Widget", version = typeof(CodexUsageService).Assembly.GetName().Version?.ToString(3) },
                     capabilities = new { experimentalApi = true, requestAttestation = false }
                 }
             }, cancellation.Token);
@@ -64,7 +64,7 @@ public sealed class CodexUsageService
         }
         catch (OperationCanceledException)
         {
-            throw new TimeoutException("Codex app-server 在 35 秒内没有完成用量查询。请稍后刷新。 ");
+            throw new TimeoutException(Localization.Text("Codex app-server 在 35 秒内没有完成用量查询。请稍后刷新。 "));
         }
         finally
         {
@@ -155,7 +155,7 @@ public sealed class CodexUsageService
         };
         startInfo.ArgumentList.Add("app-server");
         startInfo.ArgumentList.Add("--stdio");
-        return Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动 Codex app-server。");
+        return Process.Start(startInfo) ?? throw new InvalidOperationException(Localization.Text("无法启动 Codex app-server。"));
     }
 
     private static string ResolveCodexExecutable()
@@ -170,7 +170,7 @@ public sealed class CodexUsageService
         }
         catch (Exception exception)
         {
-            throw new InvalidOperationException("找不到本机 Codex CLI。", exception);
+            throw new InvalidOperationException(Localization.Text("找不到本机 Codex CLI。"), exception);
         }
     }
 
@@ -188,14 +188,14 @@ public sealed class CodexUsageService
             if (line is null)
             {
                 var details = await process.StandardError.ReadToEndAsync(token);
-                throw new InvalidOperationException($"Codex app-server 意外结束。{details}");
+                throw new InvalidOperationException(Localization.Text("Codex app-server 意外结束。{0}", details));
             }
 
             using var document = JsonDocument.Parse(line);
             var root = document.RootElement;
             if (!root.TryGetProperty("id", out var responseId) || responseId.ValueKind != JsonValueKind.Number || responseId.GetInt32() != id) continue;
-            if (root.TryGetProperty("error", out var error)) throw new InvalidOperationException($"Codex app-server 返回错误：{error.GetRawText()}");
-            if (!root.TryGetProperty("result", out var result)) throw new InvalidOperationException("Codex app-server 响应缺少 result 字段。");
+            if (root.TryGetProperty("error", out var error)) throw new InvalidOperationException(Localization.Text("Codex app-server 返回错误：{0}", error.GetRawText()));
+            if (!root.TryGetProperty("result", out var result)) throw new InvalidOperationException(Localization.Text("Codex app-server 响应缺少 result 字段。"));
             return result.Clone();
         }
     }
@@ -269,4 +269,3 @@ public readonly record struct LocalTodayUsage(long TotalTokens, int RecordCount)
 {
     public bool IsAvailable => RecordCount > 0;
 }
-

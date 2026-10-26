@@ -40,6 +40,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        Localization.Apply(settings.LanguageMode);
         InitializeComponent();
         fiveHourDots = [FiveDot1, FiveDot2, FiveDot3, FiveDot4, FiveDot5, FiveDot6];
         weekDots = [WeekDot1, WeekDot2, WeekDot3, WeekDot4, WeekDot5, WeekDot6];
@@ -58,6 +59,13 @@ public partial class MainWindow : Window
         Closed += (_, _) => { edgePreview.Close(); trayIcon.Dispose(); };
         edgePreview.PointerEntered += () => Dispatcher.BeginInvoke(() => ExpandFromEdge(false));
         MouseLeave += (_, _) => ScheduleEdgeCollapse();
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemPreferencesChanged;
+        Closed += (_, _) => Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemPreferencesChanged;
+    }
+
+    private void SystemPreferencesChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        Dispatcher.BeginInvoke(() => { if (settings.LanguageMode == "System" || settings.ThemeMode == "System") ApplySettings(); });
     }
 
     private static System.Drawing.Icon LoadApplicationIcon()
@@ -73,38 +81,17 @@ public partial class MainWindow : Window
         if (isRefreshing) return;
         isRefreshing = true;
         RefreshButton.IsEnabled = false;
-        UpdatedText.Text = "读取中…";
+        UpdatedText.Text = Localization.Text("读取中…");
         try
         {
             var snapshot = await usageService.ReadAsync();
             latestSnapshot = snapshot;
-            FiveHourPercentText.Text = $"{snapshot.FiveHourUsedPercent}%";
-            WeekPercentText.Text = $"{snapshot.WeekUsedPercent}%";
-            FiveHourResetText.Text = FormatReset(snapshot.FiveHourResetsAt);
-            WeekResetText.Text = FormatReset(snapshot.WeekResetsAt);
-            TodayTokensText.Text = snapshot.IsTodayReported ? FormatCompactNumber(snapshot.TodayTokens) : "--";
-            TodayCard.ToolTip = $"今天 Token 总量：{snapshot.TodayTokens:N0}\n来源：{(snapshot.IsTodayFromLocalSession ? "本机会话实时统计（估算）" : "app-server 后台统计")}";
-            TodaySourceText.Text = snapshot.IsTodayFromLocalSession ? "本机会话实时统计（估算）" : snapshot.IsTodayReported ? "app-server 后台统计（可能延迟）" : "等待 app-server 同步当天数据";
-            LifetimeTokensText.Text = FormatChineseNumber(snapshot.LifetimeTokens);
-            PeakDailyTokensText.Text = FormatChineseNumber(snapshot.PeakDailyTokens);
-            LongestTurnText.Text = FormatDuration(snapshot.LongestRunningTurnSec);
-            CurrentStreakText.Text = FormatDays(snapshot.CurrentStreakDays);
-            LongestStreakText.Text = FormatDays(snapshot.LongestStreakDays);
-            PaintDots(fiveHourDots, snapshot.FiveHourUsedPercent);
-            PaintDots(weekDots, snapshot.WeekUsedPercent);
-            FiveHourPercentText.Foreground = CreateUsageBrush(snapshot.FiveHourUsedPercent);
-            WeekPercentText.Foreground = CreateUsageBrush(snapshot.WeekUsedPercent);
-            UpdateEdgeProgress(snapshot.FiveHourUsedPercent);
-            edgePreview.UpdateProgress(snapshot.FiveHourUsedPercent);
-            DrawChart(snapshot.LastSevenDays);
-            UpdatedText.Text = usageService.LastReadUsedCachedAppServerData
-                ? $"刷新 {DateTime.Now:HH:mm} · 限额为缓存数据"
-                : $"刷新 {DateTime.Now:HH:mm}";
+            RenderSnapshot(snapshot);
             ToolTip = null;
         }
         catch (Exception exception)
         {
-            UpdatedText.Text = latestSnapshot is null ? "读取失败" : "读取失败，保留上次数据";
+            UpdatedText.Text = latestSnapshot is null ? Localization.Text("读取失败") : Localization.Text("读取失败，保留上次数据");
             ToolTip = $"{exception.GetType().Name}: {exception.Message}";
             WriteErrorLog(exception);
         }
@@ -115,17 +102,49 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RenderSnapshot(UsageSnapshot snapshot)
+    {
+        FiveHourPercentText.Text = $"{snapshot.FiveHourUsedPercent}%";
+        WeekPercentText.Text = $"{snapshot.WeekUsedPercent}%";
+        FiveHourResetText.Text = FormatReset(snapshot.FiveHourResetsAt);
+        WeekResetText.Text = FormatReset(snapshot.WeekResetsAt);
+        TodayTokensText.Text = snapshot.IsTodayReported ? FormatCompactNumber(snapshot.TodayTokens) : "--";
+        TodayCard.ToolTip = Localization.Text("今天 Token 总量：{0:N0}\n来源：{1}", snapshot.TodayTokens, snapshot.IsTodayFromLocalSession ? Localization.Text("本机会话实时统计（估算）") : Localization.Text("app-server 后台统计"));
+        TodaySourceText.Text = snapshot.IsTodayFromLocalSession ? Localization.Text("本机会话实时统计（估算）") : snapshot.IsTodayReported ? Localization.Text("app-server 后台统计（可能延迟）") : Localization.Text("等待 app-server 同步当天数据");
+        LifetimeTokensText.Text = FormatChineseNumber(snapshot.LifetimeTokens);
+        PeakDailyTokensText.Text = FormatChineseNumber(snapshot.PeakDailyTokens);
+        LongestTurnText.Text = FormatDuration(snapshot.LongestRunningTurnSec);
+        CurrentStreakText.Text = FormatDays(snapshot.CurrentStreakDays);
+        LongestStreakText.Text = FormatDays(snapshot.LongestStreakDays);
+        PaintDots(fiveHourDots, snapshot.FiveHourUsedPercent);
+        PaintDots(weekDots, snapshot.WeekUsedPercent);
+        FiveHourPercentText.Foreground = CreateUsageBrush(snapshot.FiveHourUsedPercent);
+        WeekPercentText.Foreground = CreateUsageBrush(snapshot.WeekUsedPercent);
+        UpdateEdgeProgress(snapshot.FiveHourUsedPercent);
+        edgePreview.UpdateProgress(snapshot.FiveHourUsedPercent);
+        DrawChart(snapshot.LastSevenDays);
+        UpdatedText.Text = usageService.LastReadUsedCachedAppServerData
+            ? Localization.Text("刷新 {0:HH:mm} · 限额为缓存数据", DateTime.Now)
+            : Localization.Text("刷新 {0:HH:mm}", DateTime.Now);
+    }
+
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new SettingsWindow(settings) { Owner = this };
         if (dialog.ShowDialog() != true) return;
         settings = dialog.Settings;
         ApplySettings();
-        UpdatedText.Text = settings.AutoRefreshEnabled ? $"自动刷新 {settings.RefreshIntervalMinutes} 分钟" : "自动刷新已关闭";
+        UpdatedText.Text = settings.AutoRefreshEnabled ? Localization.Text("自动刷新 {0} 分钟", settings.RefreshIntervalMinutes) : Localization.Text("自动刷新已关闭");
     }
 
     private void ApplySettings()
     {
+        Localization.Apply(settings.LanguageMode);
+        Language = System.Windows.Markup.XmlLanguage.GetLanguage(Localization.Culture.IetfLanguageTag);
+        var previousMenu = trayIcon.ContextMenuStrip;
+        trayIcon.ContextMenuStrip = BuildTrayMenu();
+        previousMenu?.Dispose();
+        if (latestSnapshot is not null) RenderSnapshot(latestSnapshot);
         ConfigureAutoRefresh();
         ApplyTheme();
         QuotaCard.Visibility = ToVisibility(settings.ShowQuotaCard);
@@ -216,18 +235,18 @@ public partial class MainWindow : Window
     private System.Windows.Forms.ContextMenuStrip BuildTrayMenu()
     {
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("显示", null, (_, _) => Dispatcher.BeginInvoke(ShowFromTray));
-        menu.Items.Add("刷新", null, (_, _) => Dispatcher.BeginInvoke(async () => await RefreshAsync()));
-        menu.Items.Add("设置", null, (_, _) => Dispatcher.BeginInvoke(() => SettingsButton_Click(this, new RoutedEventArgs())));
+        menu.Items.Add(Localization.Text("显示"), null, (_, _) => Dispatcher.BeginInvoke(ShowFromTray));
+        menu.Items.Add(Localization.Text("刷新"), null, (_, _) => Dispatcher.BeginInvoke(async () => await RefreshAsync()));
+        menu.Items.Add(Localization.Text("设置"), null, (_, _) => Dispatcher.BeginInvoke(() => SettingsButton_Click(this, new RoutedEventArgs())));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("退出", null, (_, _) => Dispatcher.BeginInvoke(Close));
+        menu.Items.Add(Localization.Text("退出"), null, (_, _) => Dispatcher.BeginInvoke(Close));
         return menu;
     }
 
     private void MinimizeButton_Click(object sender, RoutedEventArgs e)
     {
         Hide();
-        trayIcon.ShowBalloonTip(1200, "Codex Token Widget", "已最小化到系统托盘，双击图标可恢复。", System.Windows.Forms.ToolTipIcon.Info);
+        trayIcon.ShowBalloonTip(1200, "Codex Token Widget", Localization.Text("已最小化到系统托盘，双击图标可恢复。"), System.Windows.Forms.ToolTipIcon.Info);
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
@@ -427,13 +446,13 @@ public partial class MainWindow : Window
         Canvas.SetBottom(EdgeProgressFill, 0);
         Canvas.SetLeft(EdgeProgressFill, 0);
         EdgeProgressFill.Background = CreateUsageBrush(normalized);
-        EdgeBar.ToolTip = $"5 小时用量：{normalized}%";
+        EdgeBar.ToolTip = Localization.Text("5 小时用量：{0}%", normalized);
     }
 
-    private static string FormatCompactNumber(long value) => $"{value / 10_000d:0.#}万";
-    private static string FormatChineseNumber(long? value) => value switch { null => "--", >= 100_000_000 => $"{value.Value / 100_000_000d:0.#}亿", >= 10_000 => $"{value.Value / 10_000d:0.#}万", _ => value.Value.ToString("N0") };
-    private static string FormatDuration(long? seconds) { if (seconds is null) return "--"; var span = TimeSpan.FromSeconds(seconds.Value); return span.TotalHours >= 1 ? $"{(int)span.TotalHours}小时{span.Minutes}分" : $"{span.Minutes}分{span.Seconds}秒"; }
-    private static string FormatDays(long? days) => days is null ? "--" : $"{days}天";
+    private static string FormatCompactNumber(long value) => Localization.FormatNumber(value);
+    private static string FormatChineseNumber(long? value) => Localization.FormatNumber(value);
+    private static string FormatDuration(long? seconds) => Localization.FormatDuration(seconds);
+    private static string FormatDays(long? days) => days is null ? "--" : days == 1 && Localization.IsEnglish ? Localization.Text("一天") : Localization.Text("{0}天", days);
     private static string FormatReset(DateTimeOffset? reset) => reset is null ? "" : reset.Value.LocalDateTime.ToString("M/d HH:mm");
 
     private static void PaintDots(IEnumerable<Border> dots, int percent)
@@ -459,7 +478,7 @@ public partial class MainWindow : Window
             var day = days[index];
             var height = day.IsReported ? Math.Max(4, chartHeight * day.Tokens / max) : 4;
             var color = !day.IsReported ? "#D8DADD" : index == days.Count - 1 ? "#43C979" : "#9BE2B7";
-            var bar = new Border { Width = barWidth, Height = height, CornerRadius = new CornerRadius(4, 4, 1, 1), Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(color)), ToolTip = day.IsReported ? $"{day.Date:M/d}: {day.Tokens:N0} tokens" : $"{day.Date:M/d}: 等待后台同步" };
+            var bar = new Border { Width = barWidth, Height = height, CornerRadius = new CornerRadius(4, 4, 1, 1), Background = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(color)), ToolTip = day.IsReported ? $"{day.Date:M/d}: {day.Tokens:N0} tokens" : Localization.Text("{0}: 等待后台同步", day.Date.ToString("M/d")) };
             Canvas.SetLeft(bar, index * (barWidth + gap)); Canvas.SetTop(bar, chartHeight - height); ChartCanvas.Children.Add(bar);
             var label = new TextBlock { Text = day.Date.ToString("M/d"), FontSize = 9, Foreground = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#8F9299")), Width = barWidth, TextAlignment = TextAlignment.Center };
             Canvas.SetLeft(label, index * (barWidth + gap)); Canvas.SetTop(label, 86); ChartCanvas.Children.Add(label);
@@ -471,24 +490,3 @@ public partial class MainWindow : Window
         try { var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexTokenWidget"); Directory.CreateDirectory(directory); File.WriteAllText(Path.Combine(directory, "error.log"), $"{DateTime.Now:O}{Environment.NewLine}{exception}"); } catch { }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

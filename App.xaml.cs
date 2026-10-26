@@ -15,6 +15,7 @@ public partial class App : System.Windows.Application
         try
         {
             var settings = WidgetSettings.Load();
+            Localization.Apply(settings.LanguageMode);
             StartupIntegration.Apply(settings);
             var window = new MainWindow();
             MainWindow = window;
@@ -29,11 +30,10 @@ public partial class App : System.Windows.Application
         }
         catch (Exception exception)
         {
-            System.Windows.MessageBox.Show(exception.ToString(), "Codex Token Widget 启动失败", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            System.Windows.MessageBox.Show(exception.ToString(), Localization.Text("Codex Token Widget 启动失败"), System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
             Shutdown(-1);
         }
     }
 
     private static bool IsCodexRunning() => Process.GetProcesses().Any(process => process.ProcessName.Contains("Codex", StringComparison.OrdinalIgnoreCase));
 }
-

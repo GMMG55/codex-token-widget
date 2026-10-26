@@ -14,6 +14,7 @@ public sealed class WidgetSettings
     public bool AutoRefreshEnabled { get; set; } = true;
     public int RefreshIntervalMinutes { get; set; } = 1;
     public int EdgeBarSizePercent { get; set; } = 67;
+    public string LanguageMode { get; set; } = "System";
     public string ThemeMode { get; set; } = "System";
     public bool StartWithWindows { get; set; } = true;
     public bool StartWithCodex { get; set; } = true;
@@ -46,6 +47,3 @@ public sealed class WidgetSettings
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
     }
 }
-
-
-

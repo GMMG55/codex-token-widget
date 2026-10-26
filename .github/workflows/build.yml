@@ -17,7 +17,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Publish standalone EXE
+      - name: Verify localization
+        run: dotnet run --project tests/LocalizationChecks -c Release
+      - name: Publish Windows executable
         run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./artifacts
       - uses: actions/upload-artifact@v4
         with:

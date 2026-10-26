@@ -1,8 +1,12 @@
 # Codex Token Widget
 
+[简体中文](README.md) | [English](README.en.md)
+
 Windows 桌面悬浮组件：显示 Codex 的 5 小时和周限额、今天的 token 使用量，以及近 7 天柱状图。
 
 使用 C# / WPF / .NET 8 开发，支持打包为独立的 Windows x64 单文件 EXE。本项目由社区维护，与 OpenAI 无隶属关系。
+
+A lightweight Windows desktop widget for Codex usage: track 5-hour and weekly limits, today's tokens, and a 7-day usage chart. Built with C# / WPF / .NET 8, with Chinese, English, and automatic system language selection. Available as a standalone Windows x64 executable. Community-maintained; not affiliated with OpenAI.
 
 ## 界面预览
 
@@ -27,6 +31,21 @@ Windows 桌面悬浮组件：显示 Codex 的 5 小时和周限额、今天的 t
 - 累计 Token、单日峰值、最长聊天时长和连续使用天数（取决于数据源支持）。
 - 桌面悬浮、拖动、边缘吸附收起和托盘菜单。
 - 自动刷新、浅色 / 深色 / 系统主题，以及按需显示统计卡片。
+- 中文 / English / 跟随系统语言，保存后立即切换；数字与时长单位同步本地化。
+
+## 语言设置
+
+点击组件的设置按钮，在“语言 → 界面语言”中选择：
+
+| 选项 | 行为 |
+| --- | --- |
+| 跟随系统（默认） | 跟随 Windows 用户界面语言：英文系统使用 English，中文及其他系统回退简体中文。 |
+| 中文 | 始终使用简体中文。 |
+| English | 始终使用英文。 |
+
+点击“保存”立即生效，无需重启。选择会保存在本机设置文件中；旧版本配置没有语言字段时自动采用“跟随系统”。语言和浅色 / 深色主题各自独立，主题也可以跟随系统。
+
+中文数字采用“万 / 亿”，英文采用“K / M / B”；语言设置只改变显示格式，不改变统计数据。
 
 ## 运行要求
 
@@ -54,6 +73,12 @@ app-server 查询失败时，程序可能保留上一次限额缓存，或仅显
 git clone https://github.com/GMMG55/codex-token-widget.git
 cd codex-token-widget
 dotnet build -c Release
+```
+
+运行语言与界面检查：
+
+```powershell
+dotnet run --project tests/LocalizationChecks -c Release
 ```
 
 ## 发布单文件 EXE

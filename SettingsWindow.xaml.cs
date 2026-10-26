@@ -11,7 +11,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow(WidgetSettings settings)
     {
         InitializeComponent();
-        VersionText.Text = $"版本 {Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "未知"}";
+        VersionText.Text = Localization.Text("版本 {0}", Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? Localization.Text("未知"));
         Settings = settings;
         EnableAutoRefreshCheckBox.IsChecked = settings.AutoRefreshEnabled;
         ShowQuotaCardCheckBox.IsChecked = settings.ShowQuotaCard;
@@ -25,6 +25,8 @@ public partial class SettingsWindow : Window
         SelectInterval(settings.RefreshIntervalMinutes);
         SelectEdgeBarSize(settings.EdgeBarSizePercent);
         SelectThemeMode(settings.ThemeMode);
+        LanguageModeComboBox.SelectedValue = settings.LanguageMode;
+        if (LanguageModeComboBox.SelectedIndex < 0) LanguageModeComboBox.SelectedIndex = 0;
         StartWithWindowsCheckBox.IsChecked = settings.StartWithWindows;
         StartWithCodexCheckBox.IsChecked = settings.StartWithCodex;
         UpdateIntervalState();
@@ -86,12 +88,10 @@ public partial class SettingsWindow : Window
         Settings.ShowCurrentStreakCard = ShowCurrentStreakCardCheckBox.IsChecked == true;
         Settings.ShowLongestStreakCard = ShowLongestStreakCardCheckBox.IsChecked == true;
         Settings.ShowStatisticsCard = Settings.ShowLifetimeTokensCard || Settings.ShowPeakDailyTokensCard || Settings.ShowLongestTurnCard || Settings.ShowCurrentStreakCard || Settings.ShowLongestStreakCard;
+        Settings.LanguageMode = LanguageModeComboBox.SelectedValue?.ToString() ?? "System";
         Settings.Save();
         DialogResult = true;
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e) => DialogResult = false;
 }
-
-
-
