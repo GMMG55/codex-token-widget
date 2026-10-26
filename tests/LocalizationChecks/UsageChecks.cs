@@ -71,6 +71,12 @@ internal static class UsageChecks
         var cached = await Read(service, (name, _) => name.Contains("rateLimits") ? Task.FromResult(limits) : throw new TimeoutException());
         Check(cached.LifetimeTokens == complete.LifetimeTokens && cached.HasRateLimits, "History outage preserves cached summary");
         Check(service.LastReadUsedCachedAppServerData, "Cached result is labeled");
+        var roundTrip = JsonSerializer.Deserialize<UsageSnapshot>(JsonSerializer.Serialize(complete))!;
+        Check(roundTrip.HasRateLimits && roundTrip.LifetimeTokens == complete.LifetimeTokens && roundTrip.LastSevenDays.Count == 7, "Persisted snapshot retains limits, history and availability");
+        SetCache(service, complete with { AccountId = "previous-account" });
+        var newAccountLimits = JsonSerializer.SerializeToElement(new { accountId = "new-account", rateLimits = new { primary = new { usedPercent = 10 } } });
+        var switched = await Read(service, (name, _) => name.Contains("rateLimits") ? Task.FromResult(newAccountLimits) : throw new TimeoutException());
+        Check(switched.AccountId == "new-account" && switched.LifetimeTokens is null, "Account switch does not mix old cached history with new limits");
         var missing = await Read(new CodexUsageService(), (_, _) => throw new TimeoutException());
         Check(!missing.HasRateLimits && !missing.IsTodayReported && missing.LastSevenDays.All(day => !day.IsReported), "Cold-start outage marks unknown data unavailable");
         Console.WriteLine($"Passed {checks} usage recovery checks.");
@@ -83,6 +89,12 @@ internal static class UsageChecks
             if (!snapshot.HasRateLimits || snapshot.LifetimeTokens is null || liveService.LastAppServerError is not null)
                 throw new InvalidOperationException("Live backend validation failed: " + liveService.LastAppServerError);
             Console.WriteLine($"Live backend verified: 5h={snapshot.FiveHourUsedPercent}%, week={snapshot.WeekUsedPercent}%, lifetime={snapshot.LifetimeTokens}, reportedDays={snapshot.LastSevenDays.Count(day => day.IsReported)}/7.");
+            var restoredService = new CodexUsageService();
+            typeof(CodexUsageService).GetMethod("LoadCache", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(restoredService, null);
+            var restored = (UsageSnapshot?)typeof(CodexUsageService).GetField("lastAppServerSnapshot", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(restoredService);
+            if (restored?.LifetimeTokens != snapshot.LifetimeTokens || restoredService.LastSuccessfulReadAt is null)
+                throw new InvalidOperationException("Successful live data did not survive cache reload.");
+            Console.WriteLine("Persisted real backend data reload verified.");
         }
     }
 }

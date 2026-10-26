@@ -7,20 +7,29 @@ namespace CodexTokenWidget;
 
 public sealed class CodexUsageService
 {
+    private static readonly string CachePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexTokenWidget", "usage-cache.json");
     private UsageSnapshot? lastAppServerSnapshot;
 
     public bool LastReadUsedCachedAppServerData { get; private set; }
     public string? LastAppServerError { get; private set; }
+    public DateTimeOffset? LastSuccessfulReadAt { get; private set; }
 
     public async Task<UsageSnapshot> ReadAsync()
     {
         LastReadUsedCachedAppServerData = false;
         LastAppServerError = null;
+        if (lastAppServerSnapshot is null) LoadCache();
         var localUsageTask = Task.Run(ReadLocalTodayUsage);
         try
         {
             var snapshot = await ReadAppServerAsync();
             lastAppServerSnapshot = snapshot;
+            if (LastAppServerError is null)
+            {
+                LastSuccessfulReadAt = DateTimeOffset.Now;
+                SaveCache(snapshot);
+            }
             return ApplyLocalTodayUsage(snapshot, await localUsageTask);
         }
         catch (Exception exception)
@@ -36,6 +45,33 @@ public sealed class CodexUsageService
             throw;
         }
     }
+
+    private void LoadCache()
+    {
+        try
+        {
+            if (!File.Exists(CachePath)) return;
+            var cached = JsonSerializer.Deserialize<CachedUsage>(File.ReadAllText(CachePath));
+            if (cached?.Snapshot.LastSevenDays is not { Count: 7 }) return;
+            lastAppServerSnapshot = RefreshCalendar(cached.Snapshot);
+            LastSuccessfulReadAt = cached.SavedAt;
+        }
+        catch (Exception) { /* A corrupt cache must not prevent live queries. */ }
+    }
+
+    private void SaveCache(UsageSnapshot snapshot)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
+            var temporaryPath = CachePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(new CachedUsage(LastSuccessfulReadAt!.Value, snapshot)));
+            File.Move(temporaryPath, CachePath, true);
+        }
+        catch (Exception) { /* Cache persistence is optional; keep live data available. */ }
+    }
+
+    private sealed record CachedUsage(DateTimeOffset SavedAt, UsageSnapshot Snapshot);
 
     private async Task<UsageSnapshot> ReadAppServerAsync()
     {
@@ -106,6 +142,9 @@ public sealed class CodexUsageService
         var usage = await ReadWithRetry("account/usage/read");
         LastAppServerError = errors.Count == 0 ? null : string.Join(Environment.NewLine, errors);
         var previous = lastAppServerSnapshot is null ? null : RefreshCalendar(lastAppServerSnapshot);
+        if (limits is { } accountResponse && accountResponse.TryGetProperty("accountId", out var accountId)
+            && previous?.AccountId is { } previousAccount && accountId.GetString() != previousAccount)
+            previous = null;
         LastReadUsedCachedAppServerData = previous is not null && (limits is null || usage is null);
         var snapshot = previous ?? BuildLocalOnlySnapshot(default);
         if (limits is { } limitsResponse)
@@ -117,6 +156,7 @@ public sealed class CodexUsageService
             {
                 FiveHourUsedPercent = ReadPercent(primary), FiveHourResetsAt = ReadReset(primary),
                 WeekUsedPercent = ReadPercent(secondary), WeekResetsAt = ReadReset(secondary),
+                AccountId = limitsResponse.TryGetProperty("accountId", out var currentAccount) ? currentAccount.GetString() : null,
                 HasRateLimits = primary.ValueKind == JsonValueKind.Object || secondary.ValueKind == JsonValueKind.Object
             };
         }
@@ -329,6 +369,7 @@ public sealed record UsageSnapshot(
     long? LongestStreakDays)
 {
     public bool HasRateLimits { get; init; } = true;
+    public string? AccountId { get; init; }
 }
 
 public sealed record DailyUsage(DateOnly Date, long Tokens, bool IsReported);

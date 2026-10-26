@@ -130,6 +130,8 @@ public partial class MainWindow : Window
             : Localization.Text("刷新 {0:HH:mm}", DateTime.Now);
         if (usageService.LastReadUsedCachedAppServerData) UpdatedText.Text = Localization.Text("部分数据为上次缓存");
         UpdatedText.ToolTip = usageService.LastAppServerError;
+        if (usageService.LastReadUsedCachedAppServerData && usageService.LastSuccessfulReadAt is { } cachedAt)
+            UpdatedText.ToolTip = Localization.Text("上次成功读取：{0:g}", cachedAt.LocalDateTime) + Environment.NewLine + usageService.LastAppServerError;
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)

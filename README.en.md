@@ -51,7 +51,7 @@ Drag the widget to move it, click refresh to reload usage, and open settings to 
 
 Limits and historical statistics come from a local `codex app-server --stdio` process. Today's count prioritizes `token_usage_record` entries in `%USERPROFILE%\.codex\sessions`, grouped by local date and deduplicated by response ID. This local estimate can differ from backend statistics, which may be delayed.
 
-Limits and usage history are queried independently, each with one short retry on failure. A failed endpoint does not discard the other endpoint's successful result. Backend data already read during the current run is retained and labeled as cached; without available limits, the widget displays `--` instead of a misleading `0%`. Unavailable history is marked as pending. Query errors appear in the status tooltip and are recorded in the local error log.
+Limits and usage history are queried independently, each with one short retry on failure. A failed endpoint does not discard the other endpoint's successful result. Successful real backend data is stored locally in `usage-cache.json` and retained across restarts and temporary network failures, with a cached indicator and the last successful read time. Without available limits, the widget displays `--` instead of a misleading `0%`. Unavailable history is marked as pending. Query errors appear in the status tooltip and are recorded in the local error log.
 
 The widget does not scrape websites or browser data and contains no independent statistics upload code. Codex app-server uses your existing sign-in and may contact its backend. Settings and error logs are stored in `%LOCALAPPDATA%\CodexTokenWidget`. Remove personal information before sharing logs.
 

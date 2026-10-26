@@ -72,6 +72,7 @@ public static class Localization
         ["限额暂不可用"] = "Limits unavailable",
         ["部分数据暂不可用"] = "Some data unavailable",
         ["部分数据为上次缓存"] = "Some data cached",
+        ["上次成功读取：{0:g}"] = "Last successful read: {0:g}",
         ["Codex 后台查询超时，请稍后刷新。"] = "Codex query timed out. Please refresh later.",
         ["读取失败，保留上次数据"] = "Failed · showing previous data",
         ["自动刷新 {0} 分钟"] = "Auto-refresh: {0} min",
